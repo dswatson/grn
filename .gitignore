@@ -2,6 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.DS_Store
 grn.Rproj
 models/
 adj_mat.csv
