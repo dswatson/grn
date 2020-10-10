@@ -33,7 +33,7 @@ imp <- foreach(g = seq_len(ncol(y)), .combine = rbind) %dopar%
   rf_loop(g)
 fwrite(imp, './grn/adj_mat.csv')
 
-### SIMULATION FUNCTIONS ###
+# SIMULATION FUNCTIONS #
 
 # Simulate x function
 Sigma <- cov(x)
@@ -47,25 +47,36 @@ sim_x_fn <- function(n) {
 # Simulate y function
 sim_y_fn <- function(sim_x, y_gene) {
   f <- readRDS(paste0('./grn/models/G', 334 + y_gene, '.rds'))
-  y_hat <- predict(f, sim_x)
-  return(y_hat)
+  rmse <- sqrt(mean((f$y - f$predicted)^2))
+  n <- nrow(sim_x)
+  sim_y <- predict(f, sim_x) + rnorm(n, sd = rmse)
+  return(sim_y)
 }
 
-# Wrapper function
-sim_dat <- function(n, ko) {
-  sim_x <- sim_x_fn(n)
-  if (ko > 0) {
-    sim_x[, ko] <- min(x[, ko]) - 1
-  }
+# Simulate baseline data
+n <- 20000
+sim_x <- sim_x_fn(n)
+sim_y <- foreach(g = seq_len(ncol(y)), .combine = cbind) %dopar%
+  sim_y_fn(sim_x, g)
+colnames(sim_y) <- colnames(y)
+baseline <- cbind(sim_x, sim_y)
+saveRDS(baseline, './grn/simulations/baseline.rds')
+
+# Simulate interventions
+idx <- split(seq_len(n), rep(seq_len(10), each = 2000))
+sim_w_fn <- function(sim_x, ko) {
+  i <- idx$ko
+  sim_x_prime <- sim_x[i, ]
+  sim_x_prime[, ko] <- min(x[, ko]) - 1
   sim_y <- foreach(g = seq_len(ncol(y)), .combine = cbind) %dopar%
-    sim_y_fn(sim_x, g)
+    sim_y_fn(sim_x_prime, g)
   colnames(sim_y) <- colnames(y)
-  exprs <- cbind(sim_x, sim_y)
-  out <- as.data.table(exprs)[, w := paste0('w', ko)]
+  out <- cbind(sim_x_prime, sim_y, W = ko)
+  return(out)
 }
-sim_out <- foreach(g = 0:10, .combine = rbind) %do%
-  sim_dat(n = 2000, g)
-saveRDS(sim_out, './grn/simulations/sim_exprs.rds')
+interventions <- foreach(g = seq_len(10), .combine = rbind) %do%
+  sim_w_fn(sim_x, g)
+saveRDS(interventions, './grn/simulations/interventions.rds')
 
 # Compute phis
 adj_mat <- ifelse(imp >= 10, 1, 0)
@@ -73,50 +84,49 @@ outdegree <- colSums(adj_mat)
 keep <- which(outdegree > 100)
 
 # Kernel PCA
-phi_fn <- function(dat, tf) {
-  dat <- as.data.frame(dat)
-  x <- dat[1:2000, tf]
-  y <- dat[1:2000, 334 + which(adj_mat[, tf] == 1)]
-  trn <- as.matrix(cbind(x, y))
-  d <- Dist(trn) %>% keep(lower.tri(.))
+phi_fn <- function(tf) {
+  # Train on 2k baseline samples
+  baseline_x_trn <- baseline[seq_len(2000), tf]
+  baseline_y_trn <- baseline[seq_len(2000), 334 + which(adj_mat[, tf] == 1)]
+  baseline_trn <- cbind(baseline_x_trn, baseline_y_trn)
+  d <- Dist(baseline_trn) %>% keep(lower.tri(.))
   s <- 1 / median(d)
-  pca <- kpca(trn, kernel = 'rbfdot', kpar = list(sigma = s), features = 1)
-  w0 <- rotated(pca)
-  x_tst <- dat[2001:nrow(dat), tf]
-  y_tst <- dat[2001:nrow(dat), 334 + which(adj_mat[, tf] == 1)]
+  pca <- kpca(baseline_trn, kernel = 'rbfdot', kpar = list(sigma = s), features = 1)
+  # Project remaining baseline data
+  baseline_x_tst <- baseline[2001:20000, tf]
+  baseline_y_tst <- baseline[2001:20000, 334 + which(adj_mat[, tf] == 1)]
+  baseline_tst <- cbind(x0_tst, y0_tst)
+  phi0 <- c(rotated(pca), predict(pca, baseline_tst))
+  # Project on interventional data
+  dat <- as.data.frame(interventions)
+  dat$w <- NULL
+  x_tst <- dat[, tf]
+  y_tst <- dat[, 334 + which(adj_mat[, tf] == 1)]
   tst <- as.matrix(cbind(x_tst, y_tst))
-  w_rest <- predict(pca, tst)
-  out <- c(w0, w_rest)
+  phi_prime <- as.numeric(predict(pca, tst))
+  # Take difference in phis
+  out <- phi_prime - phi0
   return(out)
 }
-phi_mat <- foreach(g = keep, .combine = cbind) %dopar%
-  phi_fn(sim_out, g)
-colnames(phi_mat) <- paste0('phi', seq_len(length(keep)))
+phis <- foreach(g = keep, .combine = cbind) %dopar%
+  phi_fn(g)
+colnames(phis) <- paste0('phi', seq_len(length(keep)))
+saveRDS(phis, './grn/simulations/phi_mat.rds')
 
 # Export
-res <- cbind(sim_out, phi_mat)
-fwrite(res, './grn/simulations/sim_dat.csv')
+p <- ncol(mat)
+colnames(baseline) <- paste0('Z', seq_len(p))
+colnames(interventions)[seq_len(p)] <- paste0('X', seq_len(p))
+out <- cbind(baseline, interventions, phis)
+fwrite(out, './grn/simulations/sim_dat.csv')
 
 
 
 
+# Dataset structure:
+# Z (pre-treatment expression)
+# W (intervention indicator)
+# X (post-treatment expression)
+# phi (eigengene expression at t1 (X) minus eigengene expression at t0 (Z))
 
-
-phi_fn <- function(dat, dat2, tf) {
-  dat <- as.data.frame(dat)
-  x <- dat[1:2000, tf]
-  y <- dat[1:2000, 334 + which(adj_mat[, tf] == 1)]
-  trn <- as.matrix(cbind(x, y))
-  d <- Dist(trn) %>% keep(lower.tri(.))
-  s <- 1 / median(d)
-  pca <- kpca(trn, kernel = 'rbfdot', kpar = list(sigma = s), features = 1)
-  x_tst <- dat2[, tf]
-  y_tst <- dat2[, 334 + which(adj_mat[, tf] == 1)]
-  tst <- as.matrix(cbind(x_tst, y_tst))
-  out <- as.numeric(predict(pca, tst))
-  return(out)
-}
-phi_mat <- foreach(g = keep, .combine = cbind) %dopar%
-  phi_fn(sim_out, baseline, g)
-colnames(phi_mat) <- paste0('phi', seq_len(length(keep)))
-
+# How good is E[phi|Z,W]?
