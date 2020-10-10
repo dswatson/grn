@@ -5,4 +5,5 @@
 .DS_Store
 grn.Rproj
 models/
+simulations/
 adj_mat.csv
