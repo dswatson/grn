@@ -65,7 +65,7 @@ saveRDS(baseline, './grn/simulations/baseline.rds')
 # Simulate interventions
 idx <- split(seq_len(n), rep(seq_len(10), each = 2000))
 sim_w_fn <- function(sim_x, ko) {
-  i <- idx$ko
+  i <- idx[[ko]]
   sim_x_prime <- sim_x[i, ]
   sim_x_prime[, ko] <- min(x[, ko]) - 1
   sim_y <- foreach(g = seq_len(ncol(y)), .combine = cbind) %dopar%
@@ -98,11 +98,9 @@ phi_fn <- function(tf) {
   baseline_tst <- cbind(x0_tst, y0_tst)
   phi0 <- c(rotated(pca), predict(pca, baseline_tst))
   # Project on interventional data
-  dat <- as.data.frame(interventions)
-  dat$w <- NULL
-  x_tst <- dat[, tf]
-  y_tst <- dat[, 334 + which(adj_mat[, tf] == 1)]
-  tst <- as.matrix(cbind(x_tst, y_tst))
+  intervention_x_tst <- interventions[, tf]
+  intervention_y_tst <- interventions[, 334 + which(adj_mat[, tf] == 1)]
+  intervention_tst <- cbind(intervention_x_tst, intervention_y_tst)
   phi_prime <- as.numeric(predict(pca, tst))
   # Take difference in phis
   out <- phi_prime - phi0
