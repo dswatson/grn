@@ -95,13 +95,13 @@ phi_fn <- function(tf) {
   # Project remaining baseline data
   baseline_x_tst <- baseline[2001:20000, tf]
   baseline_y_tst <- baseline[2001:20000, 334 + which(adj_mat[, tf] == 1)]
-  baseline_tst <- cbind(x0_tst, y0_tst)
+  baseline_tst <- cbind(baseline_x_tst, baseline_y_tst)
   phi0 <- c(rotated(pca), predict(pca, baseline_tst))
   # Project on interventional data
   intervention_x_tst <- interventions[, tf]
   intervention_y_tst <- interventions[, 334 + which(adj_mat[, tf] == 1)]
   intervention_tst <- cbind(intervention_x_tst, intervention_y_tst)
-  phi_prime <- as.numeric(predict(pca, tst))
+  phi_prime <- as.numeric(predict(pca, intervention_tst))
   # Take difference in phis
   out <- phi_prime - phi0
   return(out)
@@ -109,7 +109,7 @@ phi_fn <- function(tf) {
 phis <- foreach(g = keep, .combine = cbind) %dopar%
   phi_fn(g)
 colnames(phis) <- paste0('phi', seq_len(length(keep)))
-saveRDS(phis, './grn/simulations/phi_mat.rds')
+saveRDS(phis, './grn/simulations/phis.rds')
 
 # Export
 p <- ncol(mat)
@@ -128,3 +128,33 @@ fwrite(out, './grn/simulations/sim_dat.csv')
 # phi (eigengene expression at t1 (X) minus eigengene expression at t0 (Z))
 
 # How good is E[phi|Z,W]?
+
+
+
+
+x_dat <- out %>%
+  as.data.frame(.) %>%
+  select(-starts_with('X', 'phi')) %>%
+  mutate(W = paste0('W', W))
+
+phi_rf_loop <- function(tf) {
+  f <- ranger(phis[, tf] ~ x_dat, num.trees = 2000, num.cores = 8)
+  saveRDS(f, paste0('./grn/phi_models/phi', tf, '.rds'))
+  out <- data.table(
+    'phi' = paste0('phi', tf),
+     'r2' = f$r.squared,
+    'mse' = f$mse
+  )
+  return(out)
+}
+phi_models_summary <- foreach(g = keep, .combine = rbind) %do%
+  phi_rf_loop(g)
+
+
+
+
+
+
+
+
+
