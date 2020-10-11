@@ -15,23 +15,12 @@ set.seed(42, kind = "L'Ecuyer-CMRG")
 
 # Import data
 mat <- as.matrix(fread('./dream5/e_coli/net3_expression_data.tsv'))
+imp <- fread('./grn/adj_mat.csv')
 
 # Scale (per authors)
 mat <- scale(mat)
 x <- mat[, seq_len(334)]
 y <- mat[, 335:ncol(mat)]
-
-# Loop
-rf_loop <- function(gene) {
-  f <- randomForest(x, y[, gene], ntree = 1000, mtry = floor(sqrt(334)),
-                    importance = TRUE)
-  saveRDS(f, paste0('./grn/models/G', 334 + gene, '.rds'))
-  out <- f$importance[, 2]
-  return(out)
-}
-imp <- foreach(g = seq_len(ncol(y)), .combine = rbind) %dopar%
-  rf_loop(g)
-fwrite(imp, './grn/adj_mat.csv')
 
 # SIMULATION FUNCTIONS #
 
@@ -117,44 +106,5 @@ colnames(baseline) <- paste0('Z', seq_len(p))
 colnames(interventions)[seq_len(p)] <- paste0('X', seq_len(p))
 out <- cbind(baseline, interventions, phis)
 fwrite(out, './grn/simulations/sim_dat.csv')
-
-
-
-
-# Dataset structure:
-# Z (pre-treatment expression)
-# W (intervention indicator)
-# X (post-treatment expression)
-# phi (eigengene expression at t1 (X) minus eigengene expression at t0 (Z))
-
-# How good is E[phi|Z,W]?
-
-
-
-
-x_dat <- out %>%
-  as.data.frame(.) %>%
-  select(-starts_with('X', 'phi')) %>%
-  mutate(W = paste0('W', W))
-
-phi_rf_loop <- function(tf) {
-  f <- ranger(phis[, tf] ~ x_dat, num.trees = 2000, num.cores = 8)
-  saveRDS(f, paste0('./grn/phi_models/phi', tf, '.rds'))
-  out <- data.table(
-    'phi' = paste0('phi', tf),
-     'r2' = f$r.squared,
-    'mse' = f$mse
-  )
-  return(out)
-}
-phi_models_summary <- foreach(g = keep, .combine = rbind) %do%
-  phi_rf_loop(g)
-
-
-
-
-
-
-
 
 
