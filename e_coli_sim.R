@@ -22,6 +22,10 @@ mat <- scale(mat)
 x <- mat[, seq_len(334)]
 y <- mat[, 335:ncol(mat)]
 
+# Compute outdegree with (arbitrary) threshold of 10
+adj_mat <- ifelse(imp >= 10, 1, 0)
+outdegree <- colSums(adj_mat)
+
 # SIMULATION FUNCTIONS #
 
 # Simulate x function
@@ -51,10 +55,12 @@ colnames(sim_y) <- colnames(y)
 baseline <- cbind(sim_x, sim_y)
 saveRDS(baseline, './grn/simulations/baseline.rds')
 
-# Simulate interventions
+# Simulate interventions on top 10 TFs by outdegree
+most_causal <- order(outdegree, decreasing = TRUE)[seq_len(10)]
 idx <- split(seq_len(n), rep(seq_len(10), each = 2000))
+names(idx) <- most_causal
 sim_w_fn <- function(sim_x, ko) {
-  i <- idx[[ko]]
+  i <- idx[[as.character(ko)]]
   sim_x_prime <- sim_x[i, ]
   sim_x_prime[, ko] <- min(x[, ko]) - 1
   sim_y <- foreach(g = seq_len(ncol(y)), .combine = cbind) %dopar%
@@ -63,16 +69,14 @@ sim_w_fn <- function(sim_x, ko) {
   out <- cbind(sim_x_prime, sim_y, W = ko)
   return(out)
 }
-interventions <- foreach(g = seq_len(10), .combine = rbind) %do%
+interventions <- foreach(g = most_causal, .combine = rbind) %do%
   sim_w_fn(sim_x, g)
 saveRDS(interventions, './grn/simulations/interventions.rds')
 
-# Compute phis
-adj_mat <- ifelse(imp >= 10, 1, 0)
-outdegree <- colSums(adj_mat)
-keep <- which(outdegree > 100)
 
-# Kernel PCA
+
+# Compute phi via kernel PCA for all TFs with outdegree 100 or greater
+keep <- which(outdegree >= 100)
 phi_fn <- function(tf) {
   # Train on 2k baseline samples
   baseline_x_trn <- baseline[seq_len(2000), tf]
@@ -80,7 +84,8 @@ phi_fn <- function(tf) {
   baseline_trn <- cbind(baseline_x_trn, baseline_y_trn)
   d <- Dist(baseline_trn) %>% keep(lower.tri(.))
   s <- 1 / median(d)
-  pca <- kpca(baseline_trn, kernel = 'rbfdot', kpar = list(sigma = s), features = 1)
+  pca <- kpca(baseline_trn, kernel = 'rbfdot', kpar = list(sigma = s), 
+              features = 1)
   # Project remaining baseline data
   baseline_x_tst <- baseline[2001:20000, tf]
   baseline_y_tst <- baseline[2001:20000, 334 + which(adj_mat[, tf] == 1)]
