@@ -22,7 +22,7 @@ y <- mat[, 335:ncol(mat)]
 rf_loop <- function(gene) {
   f <- randomForest(x, y[, gene], ntree = 1000, mtry = floor(sqrt(334)),
                     importance = TRUE)
-  saveRDS(f, paste0('./grn/models/G', 334 + gene, '.rds'))
+  saveRDS(f, paste0('./grn/genie3_models/G', 334 + gene, '.rds'))
   out <- f$importance[, 2]
   return(out)
 }
