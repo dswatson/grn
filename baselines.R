@@ -3,7 +3,6 @@ setwd('~/Documents/UCL')
 
 # Load libraries, register cores
 library(data.table)
-library(ranger)
 library(glmnet)
 library(kernlab)
 library(tidyverse)
@@ -12,7 +11,7 @@ library(doMC)
 registerDoMC(8)
 
 # Set seed
-set.seed(123, kind = "L'Ecuyer-CMRG")
+set.seed(999, kind = "L'Ecuyer-CMRG")
 
 # Import, prep data
 z <- readRDS('./grn/simulations/baseline.rds')
@@ -44,16 +43,20 @@ lasso_df <- data.frame(
 # For each of {10, 20, ..., 100}% of the (training) data
 # Test (20%) 3 models, report MSE.
 
-n <- 3000
+n <- 1000
 x1 <- cbind(w, z)
 x2 <- cbind(z, x)
 outer_loop <- function(b) {
+  # Where are we?
+  print(paste('b =', b))
   # Draw random test sample
   tst <- sample(tst_idx, 0.2 * n)
   # Permute training sample
   trn <- setdiff(tst_idx, tst)[sample.int(0.8 * n)]
   # Run inner loop
   inner_loop <- function(prop) {
+    # Where are we?
+    print(paste('prop =', prop))
     # Use first prop * length(trn) samples
     trn_p <- trn[seq_len(prop * length(trn))]
     # Fit E[Y|W,Z] models
@@ -83,8 +86,9 @@ outer_loop <- function(b) {
     inner_loop(p)
   return(out)
 }
+
 # Execute in parallel
-res <- foreach(i = 1:3, .combine = rbind) %do%
+res <- foreach(i = 1:10, .combine = rbind) %do%
   outer_loop(i)
 
 # Plot results
@@ -106,7 +110,4 @@ ggplot(df, aes(proportion, mse, color = model)) +
 # Which phis are TRUE
 # Which are selected by lasso
 # Which are selected by CI test
-
-
-
 
