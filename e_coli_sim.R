@@ -11,7 +11,7 @@ library(doMC)
 registerDoMC(8)
 
 # Set seed
-set.seed(42, kind = "L'Ecuyer-CMRG")
+set.seed(123, kind = "L'Ecuyer-CMRG")
 
 # Import data
 mat <- as.matrix(fread('./dream5/e_coli/net3_expression_data.tsv'))
@@ -25,8 +25,6 @@ y <- mat[, 335:ncol(mat)]
 # Compute outdegree with (arbitrary) threshold of 10
 adj_mat <- ifelse(imp >= 10, 1, 0)
 outdegree <- colSums(adj_mat)
-
-# SIMULATION FUNCTIONS #
 
 # Simulate x function
 Sigma <- cov(x)
@@ -47,7 +45,7 @@ sim_y_fn <- function(sim_x, y_gene) {
 }
 
 # Simulate baseline data
-n <- 20000
+n <- 1e4
 sim_x <- sim_x_fn(n)
 sim_y <- foreach(g = seq_len(ncol(y)), .combine = cbind) %dopar%
   sim_y_fn(sim_x, g)
@@ -57,7 +55,7 @@ saveRDS(baseline, './grn/simulations/baseline.rds')
 
 # Simulate interventions on top 10 TFs by outdegree
 most_causal <- order(outdegree, decreasing = TRUE)[seq_len(10)]
-idx <- split(seq_len(n), rep(seq_len(10), each = 2000))
+idx <- split(seq_len(n), rep(seq_len(10), each = 1000))
 names(idx) <- most_causal
 sim_w_fn <- function(sim_x, ko) {
   i <- idx[[as.character(ko)]]
@@ -73,22 +71,20 @@ interventions <- foreach(g = most_causal, .combine = rbind) %do%
   sim_w_fn(sim_x, g)
 saveRDS(interventions, './grn/simulations/interventions.rds')
 
-
-
 # Compute phi via kernel PCA for all TFs with outdegree 100 or greater
 keep <- which(outdegree >= 100)
 phi_fn <- function(tf) {
-  # Train on 2k baseline samples
-  baseline_x_trn <- baseline[seq_len(2000), tf]
-  baseline_y_trn <- baseline[seq_len(2000), 334 + which(adj_mat[, tf] == 1)]
+  # Train on 1k baseline samples
+  baseline_x_trn <- baseline[1:1000, tf]
+  baseline_y_trn <- baseline[1:1000, 334 + which(adj_mat[, tf] == 1)]
   baseline_trn <- cbind(baseline_x_trn, baseline_y_trn)
   d <- Dist(baseline_trn) %>% keep(lower.tri(.))
   s <- 1 / median(d)
   pca <- kpca(baseline_trn, kernel = 'rbfdot', kpar = list(sigma = s), 
               features = 1)
   # Project remaining baseline data
-  baseline_x_tst <- baseline[2001:20000, tf]
-  baseline_y_tst <- baseline[2001:20000, 334 + which(adj_mat[, tf] == 1)]
+  baseline_x_tst <- baseline[1001:10000, tf]
+  baseline_y_tst <- baseline[1001:10000, 334 + which(adj_mat[, tf] == 1)]
   baseline_tst <- cbind(baseline_x_tst, baseline_y_tst)
   phi0 <- c(rotated(pca), predict(pca, baseline_tst))
   # Project on interventional data
@@ -105,11 +101,5 @@ phis <- foreach(g = keep, .combine = cbind) %dopar%
 colnames(phis) <- paste0('phi', seq_len(length(keep)))
 saveRDS(phis, './grn/simulations/phis.rds')
 
-# Export
-p <- ncol(mat)
-colnames(baseline) <- paste0('Z', seq_len(p))
-colnames(interventions)[seq_len(p)] <- paste0('X', seq_len(p))
-out <- cbind(baseline, interventions, phis)
-fwrite(out, './grn/simulations/sim_dat.csv')
 
 
