@@ -4,7 +4,10 @@
 .Ruserdata
 .DS_Store
 grn.Rproj
-models/
+genie3_models/
 simulations/
 phi_models/
-adj_mat.csv
+phi_cont/
+old/
+*.rds
+*.csv
