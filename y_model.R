@@ -69,7 +69,7 @@ phi_predictor <- function(phi_idx) {
   tf <- keep[phi_idx]
   x <- cbind(z[, c(tf, 334 + which(adj_mat[, tf] == 1))], w)
   # Import model, export phi
-  f <- readRDS(paste0('./grn/phi_cont/phi', phi_idx, '.rds'))
+  f <- readRDS(paste0('./grn/phi_models/phi', phi_idx, '.rds'))
   phi_j_hat <- predict(f, x)$predictions
   return(phi_j_hat)
 }
