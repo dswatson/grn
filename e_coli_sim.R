@@ -13,12 +13,15 @@ registerDoMC(8)
 # Set seed
 set.seed(123, kind = "L'Ecuyer-CMRG")
 
-# Import data
+# Import data, downloaded from:
+# http://dreamchallenges.org/project/dream-5-network-inference-challenge/
 mat <- as.matrix(fread('./dream5/e_coli/net3_expression_data.tsv'))
 imp <- fread('./grn/adj_mat.csv')
 
 # Scale (per authors)
 mat <- scale(mat)
+
+# First 334 genes are transcription factors, rest are not
 x <- mat[, seq_len(334)]
 y <- mat[, 335:ncol(mat)]
 

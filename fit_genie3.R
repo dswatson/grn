@@ -10,15 +10,18 @@ registerDoMC(8)
 # Set seed
 set.seed(42, kind = "L'Ecuyer-CMRG")
 
-# Import data
+# Import data, downloaded from:
+# http://dreamchallenges.org/project/dream-5-network-inference-challenge/
 mat <- as.matrix(fread('./dream5/e_coli/net3_expression_data.tsv'))
 
 # Scale (per authors)
 mat <- scale(mat)
+
+# First 334 genes are transcription factors, rest are not
 x <- mat[, seq_len(334)]
 y <- mat[, 335:ncol(mat)]
 
-# Loop
+# Loop through, with hyperparameters as in Huyn-Thu et al., 2010
 rf_loop <- function(gene) {
   f <- randomForest(x, y[, gene], ntree = 1000, mtry = floor(sqrt(334)),
                     importance = TRUE)
@@ -26,6 +29,8 @@ rf_loop <- function(gene) {
   out <- f$importance[, 2]
   return(out)
 }
+
+# Execute in parallel, save to disk
 imp <- foreach(g = seq_len(ncol(y)), .combine = rbind) %dopar%
   rf_loop(g)
 fwrite(imp, './grn/adj_mat.csv')

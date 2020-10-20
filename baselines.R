@@ -5,6 +5,8 @@ setwd('~/Documents/UCL')
 library(data.table)
 library(glmnet)
 library(kernlab)
+library(ranger)
+library(gbm)
 library(tidyverse)
 library(ggsci)
 library(doMC)
@@ -18,12 +20,12 @@ z <- readRDS('./grn/simulations/baseline.rds')
 w <- readRDS('./grn/simulations/w.rds')
 x <- readRDS('./grn/simulations/interventions.rds')
 phis <- readRDS('./grn/simulations/phis.rds')
+phi_hat <- readRDS('./grn/simulations/phi_hat.rds')
 y <- readRDS('./grn/simulations/y.rds')
 
-# Load lasso
-trn_idx <- c(1:4000, 7001:1000)
-tst_idx <- 4001:7000
-phi_hat <- readRDS('./grn/phi_hat.rds')
+# Load pretrained lasso
+trn_idx <- c(1:5000, 7001:1000)
+tst_idx <- 5001:7000
 lasso_f <- readRDS('./grn/lasso_f.rds')
 y_hat <- predict(lasso_f, phi_hat[tst_idx, ], s = 'lambda.min')
 lasso_df <- data.frame(
@@ -34,18 +36,14 @@ lasso_df <- data.frame(
 
 ### Benchmarks ###
 
-# New W:
-# For each of the following models:
-# 1) lasso(Y|W,Z)
-# 2) lasso(Y|Z,X)
-# 3) SVM(Y|W,Z)
-# 4) SVM(Y|Z,X)
-# For each of {10, 20, ..., 100}% of the (training) data
-# Test (20%) 3 models, report MSE.
+# Preliminaries
+n <- 500
+x <- cbind(w, z)
+p <- ncol(x)
+dat <- as.data.frame(x)
+dat$y <- y
 
-n <- 1000
-x1 <- cbind(w, z)
-x2 <- cbind(z, x)
+# Loop function
 outer_loop <- function(b) {
   # Where are we?
   print(paste('b =', b))
@@ -59,21 +57,25 @@ outer_loop <- function(b) {
     print(paste('prop =', prop))
     # Use first prop * length(trn) samples
     trn_p <- trn[seq_len(prop * length(trn))]
-    # Fit E[Y|W,Z] models
-    f1 <- cv.glmnet(x = x1[trn_p, ], y = y[trn_p])
-    f2 <- ksvm(x = x1[trn_p, ], y = y[trn_p])
-    # Fit E[Y|Z,X models]
-    f3 <- cv.glmnet(x = x2[trn_p, ], y = y[trn_p])
-    f4 <- ksvm(x = x2[trn_p, ], y = y[trn_p])
+    # Lasso
+    f1 <- cv.glmnet(x = x[trn_p, ], y = y[trn_p])
+    # SVR
+    f2 <- ksvm(x = x[trn_p, ], y = y[trn_p])
+    # RF
+    f3 <- ranger(y ~ ., data = dat[trn_p, ], mtry = floor(p / 3), 
+                 num.threads = 8)
+    # GBM
+    f4 <- gbm(y ~ ., data = dat[trn_p, ], distribution = 'gaussian',
+              interaction.depth = 2, n.minobsinnode = 5)
     # Test performance
-    yhat_f1 <- as.numeric(predict(f1, x1[tst, ], s = 'lambda.min'))
-    yhat_f2 <- as.numeric(predict(f2, x1[tst, ]))
-    yhat_f3 <- as.numeric(predict(f3, x2[tst, ], s = 'lambda.min'))
-    yhat_f4 <- as.numeric(predict(f4, x2[tst, ]))
+    yhat_f1 <- as.numeric(predict(f1, x[tst, ], s = 'lambda.min'))
+    yhat_f2 <- as.numeric(predict(f2, x[tst, ]))
+    yhat_f3 <- predict(f3, dat[tst, ])$predictions
+    yhat_f4 <- predict(f4, dat[tst, ])
     # Export
     out <- data.frame(
       'proportion' = prop, 'b' = b, 
-      'model' = c('lasso_w,z', 'svm_w,z', 'lasso_z,x', 'svm_z,x', 'lasso_phi'),
+      'model' = c('lasso', 'svr', 'rf', 'gbm', 'ours'),
       'mse' = c(
         mean((y[tst] - yhat_f1)^2), mean((y[tst] - yhat_f2)^2), 
         mean((y[tst] - yhat_f3)^2), mean((y[tst] - yhat_f4)^2), 
@@ -82,12 +84,10 @@ outer_loop <- function(b) {
     )
     return(out)
   }
-  out <- foreach(p = seq(0.1, 1, 0.1), .combine = rbind) %dopar% 
+  out <- foreach(p = seq(0.1, 1, 0.1), .combine = rbind) %do% 
     inner_loop(p)
   return(out)
 }
-
-# Execute in parallel
 res <- foreach(i = 1:10, .combine = rbind) %do%
   outer_loop(i)
 
@@ -101,13 +101,4 @@ ggplot(df, aes(proportion, mse, color = model)) +
   scale_color_d3() +
   theme_bw()
 
-
-
-
-
-
-
-# Which phis are TRUE
-# Which are selected by lasso
-# Which are selected by CI test
 
